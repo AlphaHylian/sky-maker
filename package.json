@@ -1,0 +1,12 @@
+{
+  "name": "sky-maker",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Turns one picture into a Minecraft 1.8.9 custom sky resource pack, entirely in the browser.",
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "test": "node --test tests/*.test.js",
+    "template": "node scripts/make-template.js"
+  }
+}

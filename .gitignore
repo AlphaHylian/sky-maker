@@ -1,0 +1,5 @@
+# Local only: the earlier Python version and its notes
+old-python-version/
+.claude/
+node_modules/
+.DS_Store

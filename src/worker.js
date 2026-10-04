@@ -3,7 +3,8 @@
 // Messages in:  { id, type: 'load',   rgba, w, h }        -> renders with default settings
 //               { id, type: 'render', settings }
 //               { id, type: 'fix',    problem, settings } -> automatic fix, then render
-//               { id, type: 'export', settings, packName } -> zip bytes
+//               { id, type: 'export', settings, packName, overrides } -> zip bytes
+//                 (overrides: edited sky layer files, see buildPack)
 // Messages out: { id, result } or { id, error }
 
 import { buildPack, makePackIcon } from './pack.js';
@@ -49,7 +50,7 @@ async function handle(msg) {
     const zip = await buildPack({
       template: last.template, width: last.width, height: last.height,
       icon: makePackIcon(source), packName: msg.packName,
-      templateFiles: manifest.files, readTemplateFile,
+      templateFiles: manifest.files, readTemplateFile, overrides: msg.overrides || {},
     });
     return zip;
   }

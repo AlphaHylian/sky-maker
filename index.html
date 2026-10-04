@@ -77,6 +77,23 @@
   #status { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 1.4em; }
   #status.err { color: #ff7b7b; }
   .info { font-size: 12px; color: var(--muted); }
+  .layer { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; background: var(--panel2); }
+  .layer.off { opacity: .6; }
+  .layer.bad { border-color: #ff7b7b; }
+  .layer summary { list-style: none; cursor: pointer; padding: 8px 10px 6px; }
+  .layer summary::-webkit-details-marker { display: none; }
+  .layer .head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .layer .head b { font-weight: 600; }
+  .layer .head span { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .layer canvas { display: block; width: 100%; height: 30px; margin-top: 4px; }
+  .layer .body { padding: 0 10px 10px; }
+  .layer .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+  .layer .grid label, .layer .axis label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+  .layer input[type=time], .layer input[type=number], .layer select { width: 100%; min-width: 0; background: var(--panel);
+    color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px; font: inherit; color-scheme: dark; }
+  .layer .axis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .layer .errs { color: #ff7b7b; font-size: 12px; margin: 6px 0 0; padding-left: 16px; }
+  .layer .src { font-size: 11px; color: var(--muted); }
   kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-size: 11px; }
   @media (max-width: 860px) {
     body { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; overflow: auto; }
@@ -106,7 +123,13 @@
   <div id="fixes"></div>
   <button id="undoAll" disabled>Undo last change</button>
 
-  <h2>3. Export</h2>
+  <h2>3. Sky layers (.properties)</h2>
+  <p class="sub">When each layer shows during the Minecraft day, and how it mixes with the sky. The bar under each
+    layer shows how visible it is from 0:00 to 24:00; the yellow line is the preview time. Click a layer to edit it.</p>
+  <div id="layers"></div>
+  <button id="resetLayers">Reset all layers to the template</button>
+
+  <h2>4. Export</h2>
   <div class="ctl">
     <div class="row"><span>Pack name</span></div>
     <input id="packName" type="text" placeholder="My Custom Sky" maxlength="60">
@@ -163,9 +186,12 @@
 import * as THREE from 'three';
 import { DEFAULTS, MAX_SOURCE_WIDTH, PROBLEMS } from './src/pipeline.js';
 import { safeName } from './src/pack.js';
+import { BLENDS, brightnessAt, checkLayer, DEFAULT_AXIS, formatTime, inputTime, LAYER_INFO, MAIN_LAYER, parseTime,
+  readLayer, ticksToMinutes, writeLayer } from './src/skylayers.js';
 
 // ------------------------------------------------------------------ state
-const state = { loaded: false, settings: { ...DEFAULTS }, info: null, history: [], fixSnap: {}, name: '' };
+const state = { loaded: false, settings: { ...DEFAULTS }, info: null, history: [], fixSnap: {}, name: '',
+  layers: [], templateText: {} };
 const $ = (id) => document.getElementById(id);
 
 const CONTROLS = {
@@ -270,7 +296,7 @@ function changeSettings(patch, { immediate = false, record = true } = {}) {
   debounce = setTimeout(requestRender, immediate ? 0 : 120);
 }
 function pushHistory() {
-  state.history.push(JSON.parse(JSON.stringify({ settings: state.settings, fixSnap: state.fixSnap, on: onFixes() })));
+  state.history.push(JSON.parse(JSON.stringify({ settings: state.settings, fixSnap: state.fixSnap, on: onFixes(), layers: state.layers })));
   if (state.history.length > 100) state.history.shift();
   $('undoAll').disabled = false;
 }
@@ -305,15 +331,17 @@ function undoLast() {
     el.classList.toggle('on', on); el.querySelector('input').checked = on;
   });
   $('undoAll').disabled = state.history.length === 0;
+  const settingsChanged = JSON.stringify(prev.settings) !== JSON.stringify(state.settings);
   state.settings = prev.settings;
+  if (JSON.stringify(prev.layers) !== JSON.stringify(state.layers)) { state.layers = prev.layers; buildLayers(); updateTime(); }
   syncControls();
-  changeSettings({}, { immediate: true, record: false });
+  if (settingsChanged) changeSettings({}, { immediate: true, record: false });
   setStatus('Undid the last change.');
 }
 $('undoAll').addEventListener('click', undoLast);
 document.addEventListener('keydown', (e) => {
   const el = document.activeElement;
-  const typing = el && (el.tagName === 'INPUT' && el.type === 'text');
+  const typing = el && el.tagName === 'INPUT' && ['text', 'number', 'time'].includes(el.type);
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z' && !typing) { e.preventDefault(); undoLast(); }
 });
 
@@ -400,9 +428,11 @@ function syncControls() {
 $('faceSize').addEventListener('change', (e) => changeSettings({ face_size: +e.target.value }, { immediate: true }));
 $('export').addEventListener('click', async () => {
   const name = safeName($('packName').value.trim() || state.name);
+  const bad = state.layers.filter(l => l.enabled && checkLayer(l).length);
+  if (bad.length) { setStatus(`Fix the times in ${bad.map(l => shortName(l)).join(', ')} first (see Sky layers).`, true); return; }
   $('export').disabled = true; setStatus('Building resource pack…');
   try {
-    const zip = await enqueue(() => call('export', { settings: state.settings, packName: name }));
+    const zip = await enqueue(() => call('export', { settings: state.settings, packName: name, overrides: layerOverrides() }));
     const blob = new Blob([zip], { type: 'application/zip' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = `${name}.zip`; document.body.appendChild(a); a.click(); a.remove();
@@ -413,6 +443,131 @@ $('export').addEventListener('click', async () => {
 });
 
 function showBusy(on) { $('busy').style.display = on ? 'block' : 'none'; }
+
+// ------------------------------------------------------------------ sky layers (.properties)
+const TIME_FIELDS = [['startFadeIn', 'Start fade in'], ['endFadeIn', 'Fully visible from'],
+                     ['startFadeOut', 'Start fade out'], ['endFadeOut', 'Gone from']];
+const shortName = (l) => l.file.split('/').pop();
+
+async function loadLayers() {
+  const files = (await (await fetch('template/manifest.json')).json()).files
+    .filter(f => f.startsWith('sky/') && f.endsWith('.properties'));
+  for (const rel of files) {
+    const text = await (await fetch('template/mcpatcher/' + rel)).text();
+    state.templateText[rel] = text;
+  }
+  state.layers = files.map(rel => readLayer(rel, state.templateText[rel]));
+  buildLayers();
+}
+
+/** Only layers that differ from the template are sent; null leaves a layer out of the pack. */
+function layerOverrides() {
+  const o = {};
+  for (const l of state.layers) {
+    if (!l.enabled) o[l.file] = null;
+    else if (writeLayer(l) !== state.templateText[l.file]) o[l.file] = writeLayer(l);
+  }
+  return o;
+}
+
+function editLayer(file, patch) {
+  pushHistory();
+  state.layers = state.layers.map(l => (l.file === file ? { ...l, ...patch } : l));
+  refreshLayer(file);
+  if (file === MAIN_LAYER) updateTime();
+}
+
+function buildLayers() {
+  const box = $('layers'), open = new Set([...box.querySelectorAll('details[open]')].map(d => d.dataset.file));
+  box.innerHTML = '';
+  for (const l of state.layers) {
+    const d = document.createElement('details');
+    d.className = 'layer'; d.dataset.file = l.file; d.open = open.has(l.file);
+    const main = l.file === MAIN_LAYER;
+    d.innerHTML = `
+      <summary><div class="head"><b>${shortName(l)} · ${LAYER_INFO[shortName(l)] || l.source}</b><span class="when"></span></div>
+        <canvas width="600" height="60"></canvas></summary>
+      <div class="body">
+        <div class="src">Image: ${l.source.replace('./', '')}</div>
+        ${main ? '' : '<div class="ctl check"><input type="checkbox" data-k="enabled"><span>Include this layer in the pack</span></div>'}
+        <div class="grid">${TIME_FIELDS.map(([k, t]) => `<label>${t}<input type="time" step="60" data-k="${k}"></label>`).join('')}
+          <label>Blend<select data-k="blend">${BLENDS.map(b => `<option>${b}</option>`).join('')}</select></label>
+          <label>Speed (OptiFine)<input type="number" step="0.1" min="0" data-k="speed"></label>
+        </div>
+        <div class="ctl check"><input type="checkbox" data-k="rotate"><span>Turn with the sun (rotate)</span></div>
+        <div class="ctl"><div class="row"><span>Rotation axis (x y z)</span></div>
+          <div class="axis">${[0, 1, 2].map(i => `<label><input type="number" step="0.1" data-axis="${i}"></label>`).join('')}</div></div>
+        <ul class="errs"></ul>
+        <button class="undo" data-reset>Reset this layer</button>
+      </div>`;
+    d.querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', () => {
+      const k = el.dataset.k;
+      if (el.type === 'checkbox') return editLayer(l.file, { [k]: el.checked });
+      if (el.type === 'time') return editLayer(l.file, { [k]: parseTime(el.value) });
+      if (el.type === 'number') return editLayer(l.file, { [k]: el.value === '' ? NaN : +el.value });
+      editLayer(l.file, { [k]: el.value });
+    }));
+    d.querySelectorAll('[data-axis]').forEach(el => el.addEventListener('change', () => {
+      const cur = state.layers.find(x => x.file === l.file);
+      const axis = [...(cur.axis || DEFAULT_AXIS)];
+      axis[+el.dataset.axis] = el.value === '' ? 0 : +el.value;
+      editLayer(l.file, { axis });
+    }));
+    d.querySelector('[data-reset]').addEventListener('click', () => editLayer(l.file, readLayer(l.file, state.templateText[l.file])));
+    box.appendChild(d);
+    refreshLayer(l.file);
+  }
+}
+
+function refreshLayer(file) {
+  const l = state.layers.find(x => x.file === file), d = $('layers').querySelector(`[data-file="${file}"]`);
+  d.querySelectorAll('[data-k]').forEach(el => {
+    const v = l[el.dataset.k];
+    if (el.type === 'checkbox') el.checked = !!v;
+    else if (el.type === 'time') el.value = v === null ? '' : inputTime(v);
+    else el.value = Number.isNaN(v) ? '' : v;
+  });
+  d.querySelectorAll('[data-axis]').forEach(el => { el.value = (l.axis || DEFAULT_AXIS)[+el.dataset.axis]; });
+  const errs = checkLayer(l);
+  d.querySelector('.errs').innerHTML = errs.map(e => `<li>${e}</li>`).join('');
+  d.classList.toggle('bad', l.enabled && errs.length > 0);
+  d.classList.toggle('off', !l.enabled);
+  d.querySelector('.when').textContent = !l.enabled ? 'not in pack' : errs.length ? 'invalid times'
+    : `${formatTime(l.startFadeIn)}–${formatTime(l.endFadeOut)}`;
+  drawTimeline(l, d.querySelector('canvas'));
+}
+
+function drawTimeline(l, c) {
+  const g = c.getContext('2d'), w = c.width, h = c.height, top = 4, bot = h - 16;
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = '#14171c'; g.fillRect(0, top, w, bot - top);
+  g.font = '20px system-ui, sans-serif'; g.fillStyle = '#9aa3b2'; g.textBaseline = 'bottom';
+  for (let hr = 0; hr <= 24; hr += 6) {
+    const x = hr / 24 * w;
+    g.fillRect(Math.min(w - 2, x), top, 2, bot - top);
+    g.textAlign = hr === 0 ? 'left' : hr === 24 ? 'right' : 'center';
+    g.fillText(String(hr), x, h + 2);
+  }
+  if (l.enabled && !checkLayer(l).length) {
+    g.beginPath(); g.moveTo(0, bot);
+    for (let x = 0; x <= w; x++) g.lineTo(x, bot - brightnessAt(l, x / w * 1440) * (bot - top));
+    g.lineTo(w, bot); g.closePath();
+    g.fillStyle = 'rgba(95,179,255,.75)'; g.fill();
+  }
+  const now = ticksToMinutes(+$('time').value) / 1440 * w;
+  g.fillStyle = '#ffe25a'; g.fillRect(now - 1.5, top, 3, bot - top);
+}
+function drawTimelines() {
+  for (const l of state.layers) {
+    const c = $('layers').querySelector(`[data-file="${l.file}"] canvas`);
+    if (c) drawTimeline(l, c);
+  }
+}
+$('resetLayers').addEventListener('click', () => {
+  pushHistory();
+  state.layers = state.layers.map(l => readLayer(l.file, state.templateText[l.file]));
+  buildLayers(); updateTime();
+});
 
 // ------------------------------------------------------------------ 3D preview (MCPatcher geometry)
 const viewer = $('viewer');
@@ -429,6 +584,7 @@ const D = 100;
 const R = (deg, x, y, z) => new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(x, y, z).normalize(), deg * Math.PI / 180);
 const skyMaterial = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, depthWrite: false });
 const skyGroup = new THREE.Group();
+skyGroup.visible = false; // until a picture is loaded
 scene.add(skyGroup);
 
 function tileGeometry(tile, m) {
@@ -467,6 +623,7 @@ function setSkyTexture(rgba, w, h) {
   tex.needsUpdate = true;
   if (skyMaterial.map) skyMaterial.map.dispose();
   skyMaterial.map = tex; skyMaterial.needsUpdate = true;
+  skyGroup.visible = true;
 }
 
 // Overlays
@@ -516,10 +673,14 @@ function updateTime() {
   const m = R(-90, 0, 1, 0).multiply(R(a * 360, 1, 0, 0));
   sun.position.copy(new THREE.Vector3(0, 85, 0).applyMatrix4(m));
   moon.position.copy(new THREE.Vector3(0, -85, 0).applyMatrix4(m));
-  // Custom sky layer: vanilla Ry(-90), then sky3.properties rotate=true axis=0.0 -0.2 0.0 -> GL axis (z, y, -x).
-  const base = R(-90, 0, 1, 0);
-  if ($('spin').checked) base.multiply(R(a * 360, 0, -0.2, 0));
+  // Custom sky layer: vanilla Ry(-90), then sky3.properties rotate / speed / axis. Properties axis (x, y, z) -> GL axis (z, y, -x).
+  const base = R(-90, 0, 1, 0), main = state.layers.find(l => l.file === MAIN_LAYER);
+  if ($('spin').checked && main?.rotate) {
+    const [x, y, z] = main.axis || DEFAULT_AXIS;
+    if (x || y || z) base.multiply(R(a * 360 * main.speed, z, y, -x));
+  }
   skyGroup.matrixAutoUpdate = false; skyGroup.matrix.copy(base);
+  drawTimelines();
 }
 ['input', 'change'].forEach(ev => { $('time').addEventListener(ev, updateTime); $('spin').addEventListener(ev, updateTime); });
 $('showHorizon').addEventListener('change', (e) => horizon.visible = e.target.checked);
@@ -565,6 +726,7 @@ renderer.setAnimationLoop(() => {
 
 // ------------------------------------------------------------------ boot
 buildFixes();
+loadLayers().then(updateTime).catch(err => setStatus(`Could not load the sky layers: ${err.message}`, true));
 window.skyMaker = state; // for debugging in the console
 </script>
 </body>

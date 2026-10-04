@@ -1,6 +1,6 @@
 // Resource pack export, laid out like the template's mcpatcher folder.
 
-import { strToU8, zipSync } from '../vendor/fflate.js';
+import { strFromU8, strToU8, zipSync } from '../vendor/fflate.js';
 import { encodePNG } from './png.js';
 
 // The template folder goes into assets/minecraft/ of the pack.
@@ -46,17 +46,43 @@ export function makePackIcon(img) {
 /**
  * Zip whose root is the pack itself, so it can go straight into .minecraft/resourcepacks.
  * `readTemplateFile(rel)` returns the bytes of a template file (fetch in the browser, fs in tests).
+ * `overrides` maps a template path to new text (an edited .properties file) or to null (leave the file out).
+ * Sky images that no remaining layer uses are left out too.
  */
-export async function buildPack({ template, width, height, icon, packName, templateFiles, readTemplateFile }) {
+export async function buildPack({ template, width, height, icon, packName, templateFiles, readTemplateFile, overrides = {} }) {
   const mcmeta = { pack: { pack_format: PACK_FORMAT, description: safeName(packName) } };
   const files = {
     'pack.mcmeta': strToU8(JSON.stringify(mcmeta, null, 2) + '\n'),
     'pack.png': encodePNG(icon, PACK_ICON_SIZE, PACK_ICON_SIZE, { channels: 3 }),
   };
+  const kept = {};
   for (const rel of templateFiles) {
-    files[PACK_PREFIX + rel] = rel === SKY_FILE
-      ? [encodePNG(template, width, height), { level: 0 }] // already compressed
-      : await readTemplateFile(rel);
+    if (rel in overrides) {
+      if (overrides[rel] !== null) kept[rel] = strToU8(overrides[rel]);
+    } else if (rel !== SKY_FILE) {
+      kept[rel] = await readTemplateFile(rel);
+    }
+  }
+  const used = usedImages(kept);
+  for (const rel of templateFiles) {
+    if (rel === SKY_FILE) {
+      files[PACK_PREFIX + rel] = [encodePNG(template, width, height), { level: 0 }]; // already compressed
+    } else if (rel in kept && (!rel.startsWith('sky/') || !rel.endsWith('.png') || used.has(rel))) {
+      files[PACK_PREFIX + rel] = kept[rel];
+    }
   }
   return zipSync(files, { level: 6 });
+}
+
+/** Images named by source= in the sky .properties files, as template paths. */
+function usedImages(kept) {
+  const used = new Set();
+  for (const [rel, bytes] of Object.entries(kept)) {
+    if (!rel.startsWith('sky/') || !rel.endsWith('.properties')) continue;
+    const m = /^\s*source\s*[=:]\s*(.+?)\s*$/m.exec(strFromU8(bytes));
+    if (!m) continue;
+    const dir = rel.slice(0, rel.lastIndexOf('/') + 1);
+    used.add(m[1].startsWith('./') ? dir + m[1].slice(2) : m[1]);
+  }
+  return used;
 }

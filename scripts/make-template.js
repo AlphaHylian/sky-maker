@@ -180,14 +180,15 @@ function sunFlare(w, h) {
 
 // ------------------------------------------------------------------ files
 
+// Every layer writes all four fade times. (OptiFine can work out a missing startFadeOut, but explicit is clearer.)
 const PROPERTIES = {
   'sky1.properties': 'startFadeIn=18:00\nendFadeIn=18:45\nstartFadeOut=18:50\nendFadeOut=19:10\nblend=add\nrotate=true\naxis=0.0 -0.2 0.0\nsource=./cloud2.png\n',
   'sky2.properties': 'startFadeIn=4:45\nendFadeIn=5:10\nstartFadeOut=5:20\nendFadeOut=6:05\nblend=add\nrotate=true\naxis=0.0 -0.2 0.0\nsource=./cloud2.png\n',
   'sky3.properties': 'startFadeIn=5:30\nendFadeIn=6:00\nstartFadeOut=17:50\nendFadeOut=18:40\nblend=replace\nrotate=true\naxis=0.0 -0.2 0.0\nsource=./cloud1.png\n',
-  'sky4.properties': 'startFadeIn=17:30\nendFadeIn=20:00\nendFadeOut=6:10\nblend=add\nrotate=true\nsource=./starfield01.png\n',
-  'sky6.properties': 'startFadeIn=18:30\nendFadeIn=18:45\nendFadeOut=5:25\nblend=add\nrotate=true\naxis=0.0 -0.2 0.0\nsource=./starfield03.png\n',
-  'sky7.properties': 'startFadeIn=17:50\nendFadeIn=18:30\nendFadeOut=19:20\nblend=add\nrotate=true\nsource=./sky_sunflare.png\n',
-  'sky8.properties': 'startFadeIn=4:40\nendFadeIn=5:00\nendFadeOut=5:50\nblend=add\nrotate=true\nsource=./sky_sunflare.png\n',
+  'sky4.properties': 'startFadeIn=17:30\nendFadeIn=20:00\nstartFadeOut=3:40\nendFadeOut=6:10\nblend=add\nrotate=true\nsource=./starfield01.png\n',
+  'sky6.properties': 'startFadeIn=18:30\nendFadeIn=18:45\nstartFadeOut=5:10\nendFadeOut=5:25\nblend=add\nrotate=true\naxis=0.0 -0.2 0.0\nsource=./starfield03.png\n',
+  'sky7.properties': 'startFadeIn=17:50\nendFadeIn=18:30\nstartFadeOut=18:40\nendFadeOut=19:20\nblend=add\nrotate=true\nsource=./sky_sunflare.png\n',
+  'sky8.properties': 'startFadeIn=4:40\nendFadeIn=5:00\nstartFadeOut=5:30\nendFadeOut=5:50\nblend=add\nrotate=true\nsource=./sky_sunflare.png\n',
 };
 
 rmSync(OUT, { recursive: true, force: true });

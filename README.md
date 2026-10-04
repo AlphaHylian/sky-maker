@@ -17,7 +17,12 @@ Process credit: [@banjeerl on YouTube](https://www.youtube.com/watch?v=_5QU1cXuS
    (`cloud1.png`) with the square labels, and the prepared picture.
 3. **Fix.** Tick a problem to apply its automatic fix. The fix's sliders then appear. Each fix has **Undo this fix**,
    and **Undo last change** (or Ctrl+Z) steps back through every change.
-4. **Export.** Type a pack name and click **Download resource pack**. Put the zip in `.minecraft/resourcepacks`.
+4. **Sky layers.** Each `.properties` file is one layer of the sky. For each one you can set the four fade times,
+   the blend mode, whether it turns with the sun (`rotate`), its `speed` and its rotation `axis`, or leave it out of
+   the pack. A bar shows how visible the layer is over the day, with a line at the preview time. Times that would
+   make OptiFine skip the layer are flagged, and export waits until they are fixed. **Reset** puts a layer back to
+   the template. Undo works here too.
+5. **Export.** Type a pack name and click **Download resource pack**. Put the zip in `.minecraft/resourcepacks`.
    It needs OptiFine (Custom Sky on) or MCPatcher.
 
 ### What runs automatically on upload
@@ -65,11 +70,16 @@ assets/minecraft/mcpatcher/sky/world0/sky_sunflare.png   |
 assets/minecraft/mcpatcher/sky/world0/sky1..4,6..8.properties  /
 ```
 
+Layers you edited are written from the editor. Layers you turned off are left out, and so is any image that no
+remaining layer uses.
+
 ## The template
 
 Everything in [template/](template) is drawn by [scripts/make-template.js](scripts/make-template.js), so the
 project has no third-party art. It keeps the usual MCPatcher sky format: the same file names, image sizes and
-`.properties` timings.
+`.properties` timings. Every layer writes all four fade times (`startFadeIn`, `endFadeIn`, `startFadeOut`,
+`endFadeOut`). OptiFine can work out a missing `startFadeOut` (the fade out then takes as long as the fade in), but
+writing it out is clearer and matches what the editor shows.
 
 | File | Size | What it is | When it shows |
 |---|---|---|---|
@@ -106,6 +116,8 @@ npm test
 - `tests/pack.test.js`: the zip's file tree, `cloud1.png` at 3072 x 2048 RGBA, the other template files copied
   byte for byte, `pack.mcmeta` and `pack.png`.
 - `tests/template.test.js`: the template's files, image sizes and `.properties` sources.
+- `tests/skylayers.test.js`: reading and writing layers, time checks, the visibility curve, and export with edited
+  or turned-off layers.
 
 ## How it works
 
@@ -113,6 +125,7 @@ npm test
   using the same squares and rotations as MCPatcher.
 - `src/worker.js`: runs the image work in a background thread so the page stays responsive.
 - `src/pipeline.js`: the image processing and automatic fixes.
+- `src/skylayers.js`: reads, checks and writes the sky layer `.properties` files.
 - `src/geometry.js`: MCPatcher's 3x2 sky geometry (which direction each pixel faces).
 - `src/image.js`: small image helpers (resize, blur, flip).
 - `src/png.js`: PNG writer and reader. `src/pack.js`: builds the resource pack zip.
